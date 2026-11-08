@@ -96,7 +96,7 @@ On a server, use `SEND_MODE=resend` instead (see below): many hosts block Gmail'
 | `ai_disclosure` | A line under every reply saying an assistant drafted it. Keep it: it's honest and builds trust. |
 | Hidden honeypot field | Bots that fill it in are marked as spam without calling Claude. |
 | Failure fallback | If Claude or email fails, you get a "NEEDS MANUAL REPLY" email. A lead is never lost. |
-| `DASHBOARD_TOKEN` | Required on a server: the dashboard opens only at `/leads?token=...`. |
+| `DASHBOARD_TOKEN` | Required on a server: open `/leads?token=...` once; the app swaps it for a cookie and hides tokens from the access log. |
 | `WEBHOOK_SECRET` | Website builders posting JSON must send it (`X-Webhook-Secret` header or `?secret=`). |
 | `MAX_LEADS_PER_IP_PER_HOUR` | Default 5, on a server only. Stops one visitor flooding the form. |
 | `MAX_AI_CALLS_PER_DAY` | Default 200. After that, leads still reach you as "NEEDS MANUAL REPLY", so a spam flood can't run up your Claude bill. |

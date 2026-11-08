@@ -126,7 +126,18 @@ def test_dashboard_locked_until_token_set(prod):
     assert client.get("/leads").status_code == 503
     s.dashboard_token = "a-long-random-token-123"
     assert client.get("/leads").status_code == 403
-    assert client.get("/leads?token=a-long-random-token-123").status_code == 200
+    assert client.get("/leads?token=wrong-token-0000000").status_code == 403
+    first = client.get("/leads?token=a-long-random-token-123", follow_redirects=False)
+    assert first.status_code == 303 and first.headers["location"] == "/leads"
+    assert client.get("/leads").status_code == 200   # the cookie now opens it, no token in the URL
+
+
+def test_access_log_hides_secrets():
+    import logging
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s"',
+                            ("1.2.3.4", "GET", "/leads?token=abc123&x=1"), None)
+    main._RedactSecrets().filter(rec)
+    assert rec.getMessage() == '1.2.3.4 - "GET /leads?token=[hidden]&x=1"'
 
 
 def test_webhook_secret_required_for_json(prod):

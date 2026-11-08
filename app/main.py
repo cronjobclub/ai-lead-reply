@@ -5,8 +5,10 @@ Run it with:  uvicorn app.main:app --reload
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -14,7 +16,7 @@ from functools import lru_cache
 from html import escape
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from . import pages, store
 from .ai import LeadAI
@@ -25,6 +27,21 @@ from .pipeline import Lead, process_lead
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("lead-reply")
+
+_SECRET_IN_URL = re.compile(r"((?:token|secret)=)[^&\s\"]+")
+
+
+class _RedactSecrets(logging.Filter):
+    """Keep ?token=... and ?secret=... out of the access log (hosts keep logs for days)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.args:
+            record.args = tuple(_SECRET_IN_URL.sub(r"\1[hidden]", a) if isinstance(a, str) else a
+                                for a in record.args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_RedactSecrets())
 
 
 
@@ -119,13 +136,31 @@ async def receive_lead(request: Request, background: BackgroundTasks):
     return JSONResponse({"status": "received"}, status_code=202)
 
 
+COOKIE = "lead_dashboard"
+
+
+def _cookie_value(token: str) -> str:
+    return hashlib.sha256(f"lead-dashboard:{token}".encode()).hexdigest()
+
+
 @app.get("/leads", response_class=HTMLResponse)
-def dashboard(token: str = "") -> str:
+def dashboard(request: Request, token: str = ""):
     s = settings()
     if s.production and len(s.dashboard_token) < 16:
         raise HTTPException(503, "Dashboard locked: set DASHBOARD_TOKEN (16+ random characters)")
-    if s.dashboard_token and not secrets.compare_digest(token, s.dashboard_token):
-        raise HTTPException(403, "Add ?token=YOUR_DASHBOARD_TOKEN to the address")
+    if s.dashboard_token:
+        if token:
+            if not secrets.compare_digest(token, s.dashboard_token):
+                raise HTTPException(403, "Wrong token")
+            # Swap the token in the address for a cookie, so it doesn't sit in your
+            # browser history or get shared by accident with a screenshot of the address bar.
+            resp = RedirectResponse("/leads", status_code=303)
+            https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+            resp.set_cookie(COOKIE, _cookie_value(s.dashboard_token), max_age=30 * 24 * 3600,
+                            httponly=True, samesite="lax", secure=https)
+            return resp
+        if not secrets.compare_digest(request.cookies.get(COOKIE, ""), _cookie_value(s.dashboard_token)):
+            raise HTTPException(403, "Add ?token=YOUR_DASHBOARD_TOKEN to the address")
     rows = sorted(store.read_all(s.log_path), key=lambda r: r.get("received_at", ""), reverse=True)
     return pages.dashboard(profile(), rows, review_mode=s.review_mode)
 
