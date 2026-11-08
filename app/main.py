@@ -6,6 +6,8 @@ Run it with:  uvicorn app.main:app --reload
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 import time
 from contextlib import asynccontextmanager
 from functools import lru_cache
@@ -17,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from . import pages, store
 from .ai import LeadAI
 from .config import Settings, load_profile
+from .intake import DailyBudget, RateLimiter, client_ip, extract_fields
 from .mailer import Mailer
 from .pipeline import Lead, process_lead
 
@@ -47,12 +50,26 @@ def mailer() -> Mailer:
     return Mailer(settings())
 
 
+@lru_cache
+def limiter() -> RateLimiter:
+    # Only on a server: on your laptop you'll want to send as many test leads as you like.
+    s = settings()
+    return RateLimiter(s.max_leads_per_ip_per_hour if s.production else 0)
+
+
+@lru_cache
+def budget() -> DailyBudget:
+    return DailyBudget(settings().max_ai_calls_per_day)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     s = settings()
     log.info("Business: %s | model: %s | send mode: %s | review mode: %s",
              profile()["business_name"], s.model, s.send_mode, "ON" if s.review_mode else "off")
-    log.info("Contact form: http://127.0.0.1:8000/   Dashboard: http://127.0.0.1:8000/leads")
+    public = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    base = f"https://{public}" if public else "http://127.0.0.1:8000"
+    log.info("Contact form: %s/   Dashboard: %s/leads%s", base, base, "?token=..." if s.dashboard_token else "")
     yield
 
 
@@ -67,33 +84,47 @@ def form_page() -> str:
 @app.post("/lead")
 async def receive_lead(request: Request, background: BackgroundTasks):
     received = time.time()
-    if request.headers.get("content-type", "").startswith("application/json"):
-        data = await request.json()
-        wants_html = False
+    s = settings()
+    is_json = request.headers.get("content-type", "").startswith("application/json")
+    if is_json:
+        # Website builders and scripts post JSON. If a secret is set, they must send it.
+        if s.webhook_secret:
+            sent = request.headers.get("x-webhook-secret") or request.query_params.get("secret", "")
+            if not secrets.compare_digest(sent, s.webhook_secret):
+                raise HTTPException(401, "Wrong or missing webhook secret")
+        try:
+            data = await request.json()
+        except ValueError:
+            raise HTTPException(400, "Body is not valid JSON")
+        if not isinstance(data, dict):
+            raise HTTPException(400, "Expected a JSON object")
     else:
         data = dict(await request.form())
-        wants_html = True
 
-    name = str(data.get("name", "")).strip()[:120]
-    email = str(data.get("email", "")).strip()[:200]
-    message = str(data.get("message", "")).strip()[:5000]
-    if not (name and "@" in email and message):
+    if not limiter().allow(client_ip(request.headers, request.client.host if request.client else "?")):
+        raise HTTPException(429, "Too many messages from this address. Please call us instead.")
+
+    f = extract_fields(data)
+    if not (f["name"] and "@" in f["email"] and f["message"]):
         raise HTTPException(422, "name, a valid email and message are required")
 
-    lead = Lead(name=name, email=email, phone=str(data.get("phone", "")).strip()[:40],
-                message=message, honeypot=str(data.get("website", "")).strip())
+    lead = Lead(name=f["name"], email=f["email"], phone=f["phone"], message=f["message"],
+                honeypot=f["website"] if not is_json else "")
+    ai_allowed = True if lead.honeypot else budget().take()
     # Reply in the background so the visitor sees "thanks" instantly.
-    background.add_task(process_lead, lead, ai(), mailer(), settings(), profile(), received)
+    background.add_task(process_lead, lead, ai(), mailer(), s, profile(), received, ai_allowed)
 
-    if wants_html:
-        return HTMLResponse(pages.thank_you(profile(), name))
+    if not is_json:
+        return HTMLResponse(pages.thank_you(profile(), lead.name))
     return JSONResponse({"status": "received"}, status_code=202)
 
 
 @app.get("/leads", response_class=HTMLResponse)
 def dashboard(token: str = "") -> str:
     s = settings()
-    if s.dashboard_token and token != s.dashboard_token:
+    if s.production and len(s.dashboard_token) < 16:
+        raise HTTPException(503, "Dashboard locked: set DASHBOARD_TOKEN (16+ random characters)")
+    if s.dashboard_token and not secrets.compare_digest(token, s.dashboard_token):
         raise HTTPException(403, "Add ?token=YOUR_DASHBOARD_TOKEN to the address")
     rows = sorted(store.read_all(s.log_path), key=lambda r: r.get("received_at", ""), reverse=True)
     return pages.dashboard(profile(), rows, review_mode=s.review_mode)
@@ -102,6 +133,7 @@ def dashboard(token: str = "") -> str:
 @app.get("/health")
 def health() -> dict:
     s = settings()
-    return {"ok": not s.validate(), "problems": s.validate(), "model": s.model,
+    problems = s.validate()
+    return {"ok": not problems, "problems": problems, "model": s.model,
             "send_mode": s.send_mode, "review_mode": s.review_mode,
             "business": escape(profile()["business_name"])}

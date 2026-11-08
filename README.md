@@ -85,7 +85,7 @@ By default `SEND_MODE=outbox`, so emails are saved as `.eml` files in `./outbox`
    FROM_EMAIL=you@gmail.com
    ```
 
-For high volumes or your own domain, use a sending service (Resend, Postmark, Amazon SES); only `app/mailer.py` changes.
+On a server, use `SEND_MODE=resend` instead (see below): many hosts block Gmail's SMTP ports.
 
 ## Safety switches
 
@@ -96,10 +96,55 @@ For high volumes or your own domain, use a sending service (Resend, Postmark, Am
 | `ai_disclosure` | A line under every reply saying an assistant drafted it. Keep it: it's honest and builds trust. |
 | Hidden honeypot field | Bots that fill it in are marked as spam without calling Claude. |
 | Failure fallback | If Claude or email fails, you get a "NEEDS MANUAL REPLY" email. A lead is never lost. |
+| `DASHBOARD_TOKEN` | Required on a server: the dashboard opens only at `/leads?token=...`. |
+| `WEBHOOK_SECRET` | Website builders posting JSON must send it (`X-Webhook-Secret` header or `?secret=`). |
+| `MAX_LEADS_PER_IP_PER_HOUR` | Default 5, on a server only. Stops one visitor flooding the form. |
+| `MAX_AI_CALLS_PER_DAY` | Default 200. After that, leads still reach you as "NEEDS MANUAL REPLY", so a spam flood can't run up your Claude bill. |
 
-## Using your existing website form
+## Run it 24/7 on Railway (about 15 minutes, $5/month)
 
-Point any form (or Zapier, Make, n8n) at `POST /lead` with fields `name`, `email`, `phone` (optional) and `message`, as a normal form post or JSON. To receive leads from the internet, the app must run on a server rather than your laptop (Render, Railway, Fly.io or any small VPS). That's the next video.
+On your laptop the app only answers while the laptop is on. Railway runs it all the time. Prices checked November 2026: Railway Hobby is $5/month including $5 of usage, which should cover a small app like this. Resend's free plan sends 3,000 emails a month (100 a day).
+
+**1. Email that works on a server.** Railway's Hobby plan blocks SMTP (Gmail), so send through Resend's HTTPS API:
+   1. Sign up at [resend.com](https://resend.com) and create an API key.
+   2. Domains → Add domain → add the DNS records it shows at your domain registrar. Until the domain is verified, Resend only delivers to your own address.
+
+**2. Deploy.**
+   1. Fork this repo (or use your copy) and sign in at [railway.com](https://railway.com) with GitHub.
+   2. New Project → Deploy from GitHub repo → pick it. `railway.json` already tells Railway how to start the app and check `/health`.
+   3. Right-click the service → Attach volume → mount path `/data` (this keeps `leads.csv` across deploys).
+   4. Settings → Networking → Generate domain. That's your public address.
+
+**3. Variables** (service → Variables; never put keys in the code):
+
+| Variable | Value |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | your Claude API key |
+| `SEND_MODE` | `resend` |
+| `RESEND_API_KEY` | your Resend key |
+| `FROM_EMAIL` | `Your Business <hello@yourdomain.com>` (on the verified domain) |
+| `OWNER_EMAIL` | where hot-lead alerts go |
+| `DASHBOARD_TOKEN` | 16+ random characters, e.g. from `python -c "import secrets; print(secrets.token_urlsafe(24))"` |
+| `WEBHOOK_SECRET` | another random string, for website builders |
+| `DATA_DIR` | `/data` |
+
+Railway sets `RAILWAY_ENVIRONMENT`, which switches on production checks: the dashboard stays locked until `DASHBOARD_TOKEN` is set, and `/health` lists anything missing.
+
+**4. Test it** from your phone: open `https://<your-domain>/`, send a message, then open `https://<your-domain>/leads?token=<DASHBOARD_TOKEN>`.
+
+Prefer another host? It runs anywhere that runs Python (a `Procfile` is included). Render's free tier sleeps after 15 minutes idle and blocks SMTP; Fly.io is cheaper but uses a command-line tool.
+
+## Connect your website form
+
+`POST /lead` accepts a normal form post or JSON, and finds name, email, phone and message in whatever shape your site builder sends.
+
+| Your site | How |
+| --- | --- |
+| Plain HTML | `<form method="post" action="https://<your-domain>/lead">` with fields `name`, `email`, `phone`, `message` |
+| WordPress + Contact Form 7 | Plugin "CF7 to Webhook" → URL `https://<your-domain>/lead?secret=<WEBHOOK_SECRET>` |
+| Wix | Automations → trigger: form submitted → action: Send HTTP request (POST, all data) to the same URL |
+| Webflow | Site settings → Apps & integrations → Webhooks → Form submission → the same URL |
+| Squarespace, others | Zapier, Make or n8n → POST the fields as JSON to the same URL |
 
 ## Project layout
 
@@ -108,12 +153,14 @@ app/
   main.py        web app: form page, /lead webhook, /leads dashboard
   pipeline.py    what happens to one lead
   ai.py          the Claude call (prompt + JSON schema)
-  mailer.py      SMTP or outbox
+  mailer.py      SMTP, Resend or outbox
+  intake.py      reads any site builder's form; rate limit and daily AI cap
   store.py       leads.csv
   pages.py       HTML for the form and dashboard
   config.py      .env and business_profile.yaml
 business_profile.yaml
 scripts/send_demo_leads.py
+railway.json     how Railway starts and health-checks the app
 tests/           offline tests (no API key needed): python -m pytest
 ```
 

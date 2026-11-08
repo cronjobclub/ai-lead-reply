@@ -1,4 +1,4 @@
-"""Sending email: really (SMTP) or as files in ./outbox for testing."""
+"""Sending email: through SMTP, through Resend's HTTPS API, or as files in ./outbox for testing."""
 
 from __future__ import annotations
 
@@ -9,7 +9,15 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
 
+import httpx
+
 from .config import Settings
+
+RESEND_URL = "https://api.resend.com/emails"
+
+
+class MailError(RuntimeError):
+    pass
 
 
 class Mailer:
@@ -26,6 +34,17 @@ class Mailer:
         if reply_to:
             msg["Reply-To"] = reply_to
         msg.set_content(body)
+
+        if self.s.send_mode == "resend":
+            # Many hosts (Railway Hobby, Render Free) block SMTP ports, so send over HTTPS.
+            payload = {"from": self.s.from_email, "to": [to], "subject": subject, "text": body}
+            if reply_to:
+                payload["reply_to"] = reply_to
+            resp = httpx.post(RESEND_URL, json=payload, timeout=30,
+                              headers={"Authorization": f"Bearer {self.s.resend_api_key}"})
+            if resp.status_code >= 300:
+                raise MailError(f"Resend refused the email ({resp.status_code}): {resp.text[:200]}")
+            return f"sent to {to} (resend id {resp.json().get('id', '?')})"
 
         if self.s.send_mode == "smtp":
             with smtplib.SMTP(self.s.smtp_host, self.s.smtp_port, timeout=30) as smtp:

@@ -37,7 +37,7 @@ def _owner_block(lead: Lead, t: Triage | None) -> str:
 
 
 def process_lead(lead: Lead, ai: LeadAI, mailer: Mailer, settings: Settings, profile: dict,
-                 received: float | None = None) -> dict:
+                 received: float | None = None, ai_allowed: bool = True) -> dict:
     received = received or time.time()
     row = {
         "received_at": datetime.fromtimestamp(received).isoformat(timespec="seconds"),
@@ -48,6 +48,8 @@ def process_lead(lead: Lead, ai: LeadAI, mailer: Mailer, settings: Settings, pro
     try:
         if lead.honeypot:
             t = Triage("spam", "none", "Bot filled the hidden form field", "", "")
+        elif not ai_allowed:
+            raise RuntimeError("Daily limit of Claude calls reached (MAX_AI_CALLS_PER_DAY)")
         else:
             t = ai.triage(lead.name, lead.email, lead.phone, lead.message)
 
