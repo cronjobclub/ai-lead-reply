@@ -122,9 +122,9 @@ a{{color:#00F0FF}}
 <div class=sub>Updates every 3 seconds (paused while a lead is open) &middot; newest first</div>
 <script>
 // Reload for new leads, but never while someone is reading an expanded lead.
-setInterval(function () {
+setInterval(function () {{
   if (!document.querySelector("details[open]")) location.reload();
-}, 3000);
+}}, 3000);
 </script>
 {banner}<div class=stats>{stat_html}</div>
 <div class=wrap><table><thead><tr><th>Received</th><th>Kind</th><th>From</th><th>Summary</th><th>Action</th><th>Reply time</th><th>AI cost</th></tr></thead>
