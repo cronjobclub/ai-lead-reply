@@ -2,7 +2,22 @@
 
 Answer every new contact-form lead in under a minute: Claude sorts the message (hot lead, question or spam), writes a personal reply in your business's voice, emails it, alerts you about hot leads and logs everything to a spreadsheet.
 
-Built for the Cron Job Club video *"I Built an AI That Replies to Every New Lead in 60 Seconds."*
+Built for the Cron Job Club video *"I Built an AI That Replies to Every New Lead in 60 Seconds."* ▶ **[Watch it on YouTube](https://www.youtube.com/@CronJobClub)**
+
+![A lead fills in the form and the reply lands on the dashboard about 6 seconds later](docs/demo.gif)
+
+*Real run, typing sped up. The reply was sent 6.1 seconds after the lead hit Send.*
+
+<table>
+<tr>
+<td width="50%"><img src="docs/dashboard.png" alt="Dashboard: three leads sorted as spam, question and hot lead, with reply time and AI cost per lead"></td>
+<td width="50%"><img src="docs/reply.png" alt="The hot lead's message and the reply Claude wrote in the business's voice"></td>
+</tr>
+<tr>
+<td>The dashboard: every lead sorted, timed and costed</td>
+<td>The reply Claude wrote for the hot lead</td>
+</tr>
+</table>
 
 ```
 Contact form ──▶ /lead webhook ──▶ Claude (sort + draft) ──┬─ hot lead ─▶ reply + alert the owner
