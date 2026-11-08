@@ -95,7 +95,7 @@ def dashboard(token: str = "") -> str:
     s = settings()
     if s.dashboard_token and token != s.dashboard_token:
         raise HTTPException(403, "Add ?token=YOUR_DASHBOARD_TOKEN to the address")
-    rows = list(reversed(store.read_all(s.log_path)))
+    rows = sorted(store.read_all(s.log_path), key=lambda r: r.get("received_at", ""), reverse=True)
     return pages.dashboard(profile(), rows, review_mode=s.review_mode)
 
 
