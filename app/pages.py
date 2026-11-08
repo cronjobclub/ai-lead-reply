@@ -97,7 +97,7 @@ def dashboard(profile: dict, rows: list[dict], review_mode: bool) -> str:
     banner = "<div class=review>REVIEW_MODE is on: drafts go to you, not to customers.</div>" if review_mode else ""
 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="3">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Leads | {escape(profile['business_name'])}</title>
 <style>
 *{{box-sizing:border-box}} body{{margin:0;font-family:{FONT};background:#0D1117;color:#E6EDF3;padding:36px}}
@@ -119,7 +119,13 @@ details{{margin-top:8px;color:#8B949E}} summary{{cursor:pointer;font-size:13px}}
 a{{color:#00F0FF}}
 </style></head><body>
 <h1>{escape(profile['business_name'])}: incoming leads</h1>
-<div class=sub>Updates every 3 seconds &middot; newest first</div>
+<div class=sub>Updates every 3 seconds (paused while a lead is open) &middot; newest first</div>
+<script>
+// Reload for new leads, but never while someone is reading an expanded lead.
+setInterval(function () {
+  if (!document.querySelector("details[open]")) location.reload();
+}, 3000);
+</script>
 {banner}<div class=stats>{stat_html}</div>
 <div class=wrap><table><thead><tr><th>Received</th><th>Kind</th><th>From</th><th>Summary</th><th>Action</th><th>Reply time</th><th>AI cost</th></tr></thead>
 <tbody>{rows_html}</tbody></table></div>
